@@ -25,7 +25,7 @@ from fastmcp import FastMCP
 
 from . import __version__
 from .pipeline import _scan_all, _source_rows
-from .scanner import ROTATION_GUIDANCE, RULES
+from .scanner import DETECTOR_IDS, ROTATION_GUIDANCE, RULES
 from .sources import SOURCES
 
 mcp = FastMCP("agentsweep", version=__version__)
@@ -48,12 +48,20 @@ def _parse_rules(exclude_rules, only_rules) -> tuple[set[str] | None, set[str] |
     def _split(raw) -> set[str] | None:
         if raw in (None, "", []):
             return None
-        items = {r.strip() for r in raw.split(",") if r.strip()} if isinstance(raw, str) else set(raw)
-        known_rules = {r[0] for r in RULES}
+        items = (
+            {r.strip() for r in raw.split(",") if r.strip()}
+            if isinstance(raw, str)
+            else set(raw)
+        )
+        # Same validation set as the CLI: RULES ids plus detector ids (scan_text
+        # emits e.g. "bip39-mnemonic", which is not a RULES entry).
+        known_rules = {r[0] for r in RULES} | set(DETECTOR_IDS)
         unknown = items - known_rules
         if unknown:
             known = ", ".join(sorted(known_rules))
-            raise ValueError(f"unknown rule(s): {', '.join(sorted(unknown))}; known rules: {known}")
+            raise ValueError(
+                f"unknown rule(s): {', '.join(sorted(unknown))}; known rules: {known}"
+            )
         return items
 
     return _split(exclude_rules), _split(only_rules)
@@ -89,16 +97,23 @@ def scan_history(
 
     Args:
         source: source key (see list_sources) or "all"/None for every source.
-        path: scan exactly this file or directory instead of a source root.
+        path: scan exactly this file or directory (inside the source root)
+            instead of the full source root walk.
         glob: shell-style filter on file paths, e.g. "*.jsonl". None = all.
         root: override the source's default root directory (like --root).
-        exclude_rules: comma-separated rule ids to skip (e.g. "bip39,openai-key").
+        exclude_rules: comma-separated rule ids to skip (e.g. "bip39-mnemonic,openai").
         only_rules: comma-separated rule ids to keep.
         limit: max findings returned (default 200); the counts in "summary"
             always reflect the full scan. Raise it for big sweeps.
     """
     if root is not None and source in (None, "", "all"):
-        raise ValueError("root= requires an explicit source; use list_sources to pick one")
+        raise ValueError(
+            "root= requires an explicit source; use list_sources to pick one"
+        )
+    if path is not None and source in (None, "", "all"):
+        raise ValueError(
+            "path= requires an explicit source; use list_sources to pick one"
+        )
     if exclude_rules and only_rules:
         raise ValueError("pass either exclude_rules or only_rules, not both")
 
@@ -117,8 +132,22 @@ def scan_history(
             continue
 
         if path is not None:
-            p = Path(path)
-            files = [p] if p.is_file() else list(src.iter_files())
+            p = Path(path).resolve()
+            root_dir = src.root.resolve()
+            if not p.is_relative_to(root_dir):
+                # Keep the scan inside the source root: the server otherwise
+                # becomes an arbitrary-file oracle (readable-file metadata +
+                # masked findings) for any path the caller names.
+                raise ValueError(
+                    f"path {path!r} is outside the source root {src.root!s}; "
+                    "pass root= to scan a different tree"
+                )
+            if p.is_file():
+                files = [p]
+            elif p.is_dir():
+                files = sorted(f for f in p.rglob("*") if f.is_file())
+            else:
+                raise ValueError(f"path {path!r} is not a file or directory")
         else:
             files = list(src.iter_files())
         if glob:
@@ -175,7 +204,9 @@ def _relpath(f: Path, root: Path) -> str:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def get_rotation_guidance(rule: str | None = None) -> dict[str, str] | list[dict[str, Any]]:
+def get_rotation_guidance(
+    rule: str | None = None,
+) -> dict[str, str] | list[dict[str, Any]]:
     """Provider-specific steps for rotating a leaked credential.
 
     Pass a rule id from scan_history findings for one provider's steps;
@@ -185,7 +216,9 @@ def get_rotation_guidance(rule: str | None = None) -> dict[str, str] | list[dict
         return ROTATION_GUIDANCE
     if rule not in ROTATION_GUIDANCE:
         known = ", ".join(sorted(ROTATION_GUIDANCE))
-        raise ValueError(f"no rotation guidance for rule {rule!r}; known rules: {known}")
+        raise ValueError(
+            f"no rotation guidance for rule {rule!r}; known rules: {known}"
+        )
     return {rule: ROTATION_GUIDANCE[rule]}
 
 

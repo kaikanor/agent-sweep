@@ -56,6 +56,9 @@ dev = [
     "bandit>=1.7",     # Python SAST — fitting for a secrets-redaction tool
     "pip-audit>=2.7",  # dependency CVE scanning (SCA)
     "deptry>=0.20",    # unused / missing dependency detection
+    # tests/test_mcp_server.py guards the whole MCP surface; without fastmcp
+    # installed, its importorskip skips it silently (CI installs .[dev]).
+    "fastmcp>=2.3.4",
 ]
 
 [project.scripts]

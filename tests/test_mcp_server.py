@@ -28,6 +28,12 @@ from agentsweep.mcp_server import (  # noqa: E402
 from agentsweep.scanner import ROTATION_GUIDANCE, scan_text  # noqa: E402
 from agentsweep.sources import SOURCES  # noqa: E402
 
+# FastMCP 2.x binds each decorated name to a non-callable FunctionTool
+# (.fn is the wrapped function); 3.x+ returns the original function.
+scan_history = getattr(scan_history, "fn", scan_history)
+list_sources = getattr(list_sources, "fn", list_sources)
+get_rotation_guidance = getattr(get_rotation_guidance, "fn", get_rotation_guidance)
+
 
 # ---------------------------------------------------------------------------
 # Plaintext boundary helper: the one rule the whole module exists to enforce.
@@ -39,7 +45,9 @@ def _collect_plaintexts() -> None:
     """Scan one string containing a real-looking fake secret per rule family."""
     if PLAINTEXTS:
         return
-    sample = "token=ghp_" + "A" * 36 + " key=AKIA" + "B" * 16 + " sk=sk-proj-" + "C" * 40
+    sample = (
+        "token=ghp_" + "A" * 36 + " key=AKIA" + "B" * 16 + " sk=sk-proj-" + "C" * 40
+    )
     for f in scan_text(sample):
         PLAINTEXTS.append(f.value)
 
@@ -112,7 +120,9 @@ def test_scan_history_masks_plaintext(fake_history):
 
 def test_scan_history_only_rules_filters(fake_history):
     root, _secret = fake_history
-    result = scan_history(source="claude-code", root=str(root), only_rules="aws-access-key")
+    result = scan_history(
+        source="claude-code", root=str(root), only_rules="aws-access-key"
+    )
     assert result["findings"] == []
 
 
@@ -129,7 +139,10 @@ def test_scan_history_rejects_exclude_and_only(fake_history):
     root, _secret = fake_history
     with pytest.raises(ValueError, match="not both"):
         scan_history(
-            source="claude-code", root=str(root), exclude_rules="github-pat", only_rules="aws-access-key"
+            source="claude-code",
+            root=str(root),
+            exclude_rules="github-pat",
+            only_rules="aws-access-key",
         )
 
 
@@ -143,6 +156,41 @@ def test_scan_history_empty_root_lands_in_skipped(tmp_path):
     result = scan_history(source="claude-code", root=str(tmp_path))
     assert result["skipped_sources"] == ["claude-code"]
     assert result["findings"] == []
+
+
+def test_scan_history_path_requires_explicit_source(fake_history):
+    root, _secret = fake_history
+    with pytest.raises(ValueError, match="requires an explicit source"):
+        scan_history(source="all", path=str(root / "history.jsonl"))
+
+
+def test_scan_history_path_directory_is_scanned(fake_history):
+    root, secret = fake_history
+    result = scan_history(source="claude-code", root=str(root), path=str(root))
+    assert result["findings"], (
+        "directory path= must scan the tree, not fall back to nothing"
+    )
+    blob = json.dumps(result)
+    assert secret not in blob
+
+
+def test_scan_history_path_outside_root_rejected(fake_history, tmp_path):
+    root, _secret = fake_history
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "other.jsonl").write_text("x\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="outside the source root"):
+        scan_history(
+            source="claude-code", root=str(root), path=str(outside / "other.jsonl")
+        )
+
+
+def test_scan_history_nonexistent_path_rejected(fake_history):
+    root, _secret = fake_history
+    with pytest.raises(ValueError, match="not a file or directory"):
+        scan_history(
+            source="claude-code", root=str(root), path=str(root / "nope.jsonl")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +227,13 @@ def test_parse_rules_roundtrip():
     exclude, only = _parse_rules("github-pat,aws-access-key", None)
     assert exclude == {"github-pat", "aws-access-key"}
     assert only is None
+
+
+def test_parse_rules_accepts_detector_ids():
+    # scan_text emits "bip39-mnemonic", which is a DETECTOR_IDS entry, not a
+    # RULES regex id — the CLI validates against both sets; MCP must too.
+    exclude, _ = _parse_rules("bip39-mnemonic", None)
+    assert exclude == {"bip39-mnemonic"}
 
 
 # ---------------------------------------------------------------------------
