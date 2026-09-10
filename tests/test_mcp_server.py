@@ -160,13 +160,31 @@ def test_mcp_cli_shim_missing_extra_message(monkeypatch, capsys):
 
     def fake_import(name, *a, **k):
         if name == "agentsweep.mcp_server":
-            raise ImportError("No module named 'fastmcp'")
+            raise ModuleNotFoundError("No module named 'fastmcp'", name="fastmcp")
         return real_import(name, *a, **k)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(SystemExit) as exc_info:
         mcp_cli.main()
     assert "agentsweep[mcp]" in str(exc_info.value)
+
+
+def test_mcp_cli_shim_reraises_other_import_errors(monkeypatch):
+    import builtins
+    from agentsweep import mcp_cli
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "agentsweep.mcp_server":
+            raise ModuleNotFoundError(
+                "No module named 'agentsweep.scanner'", name="agentsweep.scanner"
+            )
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(ModuleNotFoundError, match="agentsweep.scanner"):
+        mcp_cli.main()
 
 
 def test_scan_history_rejects_exclude_and_only(fake_history):

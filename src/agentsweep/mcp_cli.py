@@ -11,7 +11,9 @@ from __future__ import annotations
 def main() -> None:
     try:
         from agentsweep.mcp_server import mcp
-    except ImportError as exc:
+    except ModuleNotFoundError as exc:
+        if exc.name != "fastmcp":
+            raise
         raise SystemExit(
             "agentsweep-mcp requires the optional MCP extra.\n"
             "Install it with: pip install 'agentsweep[mcp]'"
