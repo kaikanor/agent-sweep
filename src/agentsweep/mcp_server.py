@@ -116,6 +116,8 @@ def scan_history(
         )
     if exclude_rules and only_rules:
         raise ValueError("pass either exclude_rules or only_rules, not both")
+    if limit < 0:
+        raise ValueError(f"limit must be >= 0, got {limit}")
 
     exclude, only = _parse_rules(exclude_rules, only_rules)
 
@@ -127,14 +129,15 @@ def scan_history(
     for key in _parse_source(source):
         cls = SOURCES[key]
         src = cls(root=Path(root)) if root is not None else cls()
-        if not src.is_detected():
-            skipped_sources.append(key)
-            continue
 
+        # Validate path= before the detection skip: with the default root
+        # absent, is_detected() would otherwise swallow a bad path into a
+        # "skipped" result instead of the documented error.
+        resolved_path: Path | None = None
         if path is not None:
-            p = Path(path).resolve()
+            resolved_path = Path(path).resolve()
             root_dir = src.root.resolve()
-            if not p.is_relative_to(root_dir):
+            if not resolved_path.is_relative_to(root_dir):
                 # Keep the scan inside the source root: the server otherwise
                 # becomes an arbitrary-file oracle (readable-file metadata +
                 # masked findings) for any path the caller names.
@@ -142,12 +145,19 @@ def scan_history(
                     f"path {path!r} is outside the source root {src.root!s}; "
                     "pass root= to scan a different tree"
                 )
-            if p.is_file():
-                files = [p]
-            elif p.is_dir():
-                files = sorted(f for f in p.rglob("*") if f.is_file())
-            else:
+            if not (resolved_path.is_file() or resolved_path.is_dir()):
                 raise ValueError(f"path {path!r} is not a file or directory")
+
+        if not src.is_detected():
+            skipped_sources.append(key)
+            continue
+
+        if resolved_path is not None:
+            files = (
+                [resolved_path]
+                if resolved_path.is_file()
+                else sorted(f for f in resolved_path.rglob("*") if f.is_file())
+            )
         else:
             files = list(src.iter_files())
         if glob:

@@ -64,7 +64,7 @@ dev = [
 [project.scripts]
 agentsweep = "agentsweep.cli:main"
 asweep = "agentsweep.cli:main"
-agentsweep-mcp = "agentsweep.mcp_server:main"
+agentsweep-mcp = "agentsweep.mcp_cli:main"
 
 
 [project.urls]

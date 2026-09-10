@@ -135,6 +135,40 @@ def test_scan_history_limit_truncates_but_counts_full(fake_history):
     assert "github-pat" in result["summary"]["by_rule"]
 
 
+def test_scan_history_rejects_negative_limit():
+    with pytest.raises(ValueError, match="limit must be"):
+        scan_history(source="claude-code", limit=-1)
+
+
+def test_scan_history_bad_path_errors_even_when_root_absent(tmp_path, monkeypatch):
+    # Default claude-code root doesn't exist under the isolated HOME; a bad
+    # path= must still raise, not silently land in skipped_sources.
+    fake_root = tmp_path / "elsewhere"
+    fake_root.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home-empty"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home-empty"))
+    (tmp_path / "home-empty").mkdir(exist_ok=True)
+    with pytest.raises(ValueError, match="outside the source root"):
+        scan_history(source="claude-code", path=str(fake_root / "x.jsonl"))
+
+
+def test_mcp_cli_shim_missing_extra_message(monkeypatch, capsys):
+    import builtins
+    from agentsweep import mcp_cli
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name == "agentsweep.mcp_server":
+            raise ImportError("No module named 'fastmcp'")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    with pytest.raises(SystemExit) as exc_info:
+        mcp_cli.main()
+    assert "agentsweep[mcp]" in str(exc_info.value)
+
+
 def test_scan_history_rejects_exclude_and_only(fake_history):
     root, _secret = fake_history
     with pytest.raises(ValueError, match="not both"):
