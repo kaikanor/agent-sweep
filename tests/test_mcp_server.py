@@ -98,10 +98,10 @@ def test_scan_history_unknown_source_lists_known():
 
 
 @pytest.fixture
-def fake_history(tmp_path):
-    """A leaky JSONL tree shaped like a claude-code projects dir."""
+def fake_history(_isolate_home):
+    """A leaky JSONL tree under the isolated HOME's default claude-code root."""
     secret = "ghp_" + "A" * 36
-    root = tmp_path / "claude" / "projects"
+    root = _isolate_home / ".claude" / "projects"
     root.mkdir(parents=True)
     (root / "history.jsonl").write_text(
         json.dumps({"prompt": f"deploy with {secret}"}) + "\n", encoding="utf-8"
@@ -110,8 +110,8 @@ def fake_history(tmp_path):
 
 
 def test_scan_history_masks_plaintext(fake_history):
-    root, secret = fake_history
-    result = scan_history(source="claude-code", root=str(root))
+    _root, secret = fake_history
+    result = scan_history(source="claude-code")
     assert result["findings"], "expected at least one finding"
     blob = json.dumps(result)
     assert secret not in blob
@@ -119,16 +119,12 @@ def test_scan_history_masks_plaintext(fake_history):
 
 
 def test_scan_history_only_rules_filters(fake_history):
-    root, _secret = fake_history
-    result = scan_history(
-        source="claude-code", root=str(root), only_rules="aws-access-key"
-    )
+    result = scan_history(source="claude-code", only_rules="aws-access-key")
     assert result["findings"] == []
 
 
 def test_scan_history_limit_truncates_but_counts_full(fake_history):
-    root, _secret = fake_history
-    result = scan_history(source="claude-code", root=str(root), limit=0)
+    result = scan_history(source="claude-code", limit=0)
     assert result["findings"] == []
     assert result["findings_truncated"] is True
     assert result["summary"]["total_findings"] >= 1
@@ -188,24 +184,16 @@ def test_mcp_cli_shim_reraises_other_import_errors(monkeypatch):
 
 
 def test_scan_history_rejects_exclude_and_only(fake_history):
-    root, _secret = fake_history
     with pytest.raises(ValueError, match="not both"):
         scan_history(
             source="claude-code",
-            root=str(root),
             exclude_rules="github-pat",
             only_rules="aws-access-key",
         )
 
 
-def test_scan_history_root_requires_explicit_source(tmp_path):
-    # root= only makes sense for one source; "all" + root must be rejected.
-    with pytest.raises(ValueError, match="requires an explicit source"):
-        scan_history(source="all", root=str(tmp_path))
-
-
-def test_scan_history_empty_root_lands_in_skipped(tmp_path):
-    result = scan_history(source="claude-code", root=str(tmp_path))
+def test_scan_history_missing_source_lands_in_skipped():
+    result = scan_history(source="claude-code")
     assert result["skipped_sources"] == ["claude-code"]
     assert result["findings"] == []
 
@@ -218,7 +206,7 @@ def test_scan_history_path_requires_explicit_source(fake_history):
 
 def test_scan_history_path_directory_is_scanned(fake_history):
     root, secret = fake_history
-    result = scan_history(source="claude-code", root=str(root), path=str(root))
+    result = scan_history(source="claude-code", path=str(root))
     assert result["findings"], (
         "directory path= must scan the tree, not fall back to nothing"
     )
@@ -227,22 +215,17 @@ def test_scan_history_path_directory_is_scanned(fake_history):
 
 
 def test_scan_history_path_outside_root_rejected(fake_history, tmp_path):
-    root, _secret = fake_history
     outside = tmp_path / "elsewhere"
     outside.mkdir()
     (outside / "other.jsonl").write_text("x\n", encoding="utf-8")
     with pytest.raises(ValueError, match="outside the source root"):
-        scan_history(
-            source="claude-code", root=str(root), path=str(outside / "other.jsonl")
-        )
+        scan_history(source="claude-code", path=str(outside / "other.jsonl"))
 
 
 def test_scan_history_nonexistent_path_rejected(fake_history):
     root, _secret = fake_history
     with pytest.raises(ValueError, match="not a file or directory"):
-        scan_history(
-            source="claude-code", root=str(root), path=str(root / "nope.jsonl")
-        )
+        scan_history(source="claude-code", path=str(root / "nope.jsonl"))
 
 
 # ---------------------------------------------------------------------------

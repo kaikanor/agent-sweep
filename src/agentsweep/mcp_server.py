@@ -84,7 +84,6 @@ def scan_history(
     source: str | None = None,
     path: str | None = None,
     glob: str | None = None,
-    root: str | None = None,
     exclude_rules: str | None = None,
     only_rules: str | None = None,
     limit: int = 200,
@@ -97,19 +96,14 @@ def scan_history(
 
     Args:
         source: source key (see list_sources) or "all"/None for every source.
-        path: scan exactly this file or directory (inside the source root)
-            instead of the full source root walk.
+        path: scan exactly this file or directory (inside the registered
+            source root) instead of the full source root walk.
         glob: shell-style filter on file paths, e.g. "*.jsonl". None = all.
-        root: override the source's default root directory (like --root).
         exclude_rules: comma-separated rule ids to skip (e.g. "bip39-mnemonic,openai").
         only_rules: comma-separated rule ids to keep.
         limit: max findings returned (default 200); the counts in "summary"
             always reflect the full scan. Raise it for big sweeps.
     """
-    if root is not None and source in (None, "", "all"):
-        raise ValueError(
-            "root= requires an explicit source; use list_sources to pick one"
-        )
     if path is not None and source in (None, "", "all"):
         raise ValueError(
             "path= requires an explicit source; use list_sources to pick one"
@@ -128,7 +122,7 @@ def scan_history(
 
     for key in _parse_source(source):
         cls = SOURCES[key]
-        src = cls(root=Path(root)) if root is not None else cls()
+        src = cls()
 
         # Validate path= before the detection skip: with the default root
         # absent, is_detected() would otherwise swallow a bad path into a
@@ -142,8 +136,7 @@ def scan_history(
                 # becomes an arbitrary-file oracle (readable-file metadata +
                 # masked findings) for any path the caller names.
                 raise ValueError(
-                    f"path {path!r} is outside the source root {src.root!s}; "
-                    "pass root= to scan a different tree"
+                    f"path {path!r} is outside the source root {src.root!s}"
                 )
             if not (resolved_path.is_file() or resolved_path.is_dir()):
                 raise ValueError(f"path {path!r} is not a file or directory")
